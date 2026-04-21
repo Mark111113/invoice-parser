@@ -29,10 +29,48 @@ python captcha_workbench.py --port 8787
 python parser.py --input-dir /path/to/invoices --output-dir /path/to/output
 ```
 
-## 环境变量
+## Docker 部署（推荐）
+
+```bash
+# 克隆仓库
+git clone https://github.com/Mark111113/invoice-parser.git
+cd invoice-parser
+
+# 创建数据目录
+mkdir -p data/invoices data/output
+
+# 把发票文件放到 data/invoices/
+
+# 启动
+docker compose up -d
+
+# 访问 http://localhost:8787
+```
+
+### 数据目录
+
+```
+data/
+├── invoices/    ← 放发票文件（PDF/XML/OFD）
+└── output/      ← 解析结果（自动按购方分桶）
+```
+
+输出目录会自动按购方实体创建子目录：
+```
+data/output/
+├── 发票_解析结果_苏州奥伟尔科技有限公司/
+├── 发票_解析结果_个人/
+└── 发票_解析结果_待确认购方/
+```
+
+## 手动安装
+
+### 环境变量
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
+| `INVOICE_INPUT_DIR` | `~/invoices` | 发票输入目录 |
+| `INVOICE_OUTPUT_DIR` | `~/invoices_output` | 解析结果输出目录 |
 | `OCR_BASE_URL` | `http://localhost:17861` | OCR 服务地址（可选） |
 | `DISPLAY` | - | X 显示（浏览器截图需要） |
 
