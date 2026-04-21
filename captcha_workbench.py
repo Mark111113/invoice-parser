@@ -20,7 +20,7 @@ from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from pydantic import BaseModel
 
-DEFAULT_OUTPUT_PARENT = Path('/mnt/fn/Download3/clawdbotfile/财务')
+DEFAULT_OUTPUT_PARENT = Path(os.environ.get('INVOICE_OUTPUT_PARENT', str(Path.home() / 'invoices_output')))
 
 BASE_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = BASE_DIR.parent
@@ -41,8 +41,8 @@ try:
 except Exception:
     solve_captcha = None
 
-DEFAULT_INPUT_DIR = Path('/mnt/fn/Download3/clawdbotfile/财务/发票')
-DEFAULT_OUTPUT_DIR = Path('/mnt/fn/Download3/clawdbotfile/财务/发票_解析结果')
+DEFAULT_INPUT_DIR = Path(os.environ.get('INVOICE_INPUT_DIR', str(Path.home() / 'invoices')))
+DEFAULT_OUTPUT_DIR = Path(os.environ.get('INVOICE_OUTPUT_DIR', str(Path.home() / 'invoices_output')))
 INPUT_DIR = DEFAULT_INPUT_DIR
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 UPLOAD_DIR = OUTPUT_DIR / 'uploads'
@@ -1201,7 +1201,7 @@ button.danger { background:#fff1f0; color:#c53030; border-color:#ffccc7; }
   <span class='section-title' style='display:inline; margin:0; border:0;'>📂 输入设置</span>
 </div>
 <div class='actions'>
-  <label>输入目录：<input id='input-dir' type='text' value='/mnt/fn/Download3/clawdbotfile/财务/发票' style='width:380px; margin-right:6px;' /></label>
+  <label>输入目录：<input id='input-dir' type='text' value='' placeholder='选择或输入发票目录路径' style='width:380px; margin-right:6px;' /></label>
   <label>输出目录：<select id='output-dir-select' style='min-width:300px; margin-right:6px;'></select></label>
   <button class='primary' onclick='parseInputDir()'>解析</button>
   <button onclick='rebuildTasks()'>重建查验任务</button>

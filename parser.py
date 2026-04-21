@@ -18,8 +18,8 @@ import pandas as pd
 from verify.verify_contract import build_verify_task_id
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_INPUT_DIR = Path('/mnt/fn/Download3/clawdbotfile/财务/发票')
-DEFAULT_OUTPUT_DIR = Path('/mnt/fn/Download3/clawdbotfile/财务/发票_解析结果')
+DEFAULT_INPUT_DIR = Path(os.environ.get('INVOICE_INPUT_DIR', str(Path.home() / 'invoices')))
+DEFAULT_OUTPUT_DIR = Path(os.environ.get('INVOICE_OUTPUT_DIR', str(Path.home() / 'invoices_output')))
 CATEGORY_RULES_PATH = BASE_DIR / 'category_rules.json'
 INPUT_DIR = DEFAULT_INPUT_DIR
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR
