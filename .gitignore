@@ -40,6 +40,9 @@ verify_results/
 .DS_Store
 Thumbs.db
 
+# Docker data
+data/
+
 # 归档
 _archive/
 archive/

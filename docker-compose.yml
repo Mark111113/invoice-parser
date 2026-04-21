@@ -1,0 +1,18 @@
+services:
+  invoice-parser:
+    build: .
+    container_name: invoice-parser
+    ports:
+      - "8787:8787"
+    volumes:
+      # 发票输入目录（放 PDF/XML/OFD 文件）
+      - ./data/invoices:/data/invoices
+      # 解析结果输出（按购方自动分桶）
+      - ./data/output:/data/output
+    environment:
+      - INVOICE_INPUT_DIR=/data/invoices
+      - INVOICE_OUTPUT_DIR=/data/output
+      - INVOICE_OUTPUT_PARENT=/data/output
+      # 可选：OCR 服务地址（如果有的话）
+      # - OCR_BASE_URL=http://host.docker.internal:17861
+    restart: unless-stopped
