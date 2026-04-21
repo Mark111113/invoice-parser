@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import os
 import hashlib
 import html
 import json
