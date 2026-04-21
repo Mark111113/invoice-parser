@@ -1,0 +1,62 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 运行时下载的签名脚本（不含在仓库中）
+verify/upstream_js/wlop.js
+verify/upstream_js/*.js
+!verify/upstream_js/.gitkeep
+
+# 上传/输出数据
+uploads/
+verify_tasks/
+verify_results/
+*.json
+!package.json
+!category_rules.json
+!entity_meta.json
+
+# Excel 输出
+*.xlsx
+*.csv
+
+# 环境文件
+.env
+.env.*
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 归档
+_archive/
+archive/
+_old_*
+deploy/
+
+# Node
+node_modules/
+
+# 测试/临时
+temp/
+*.tmp
+*.bak
+
+# 内部文档（含敏感信息）
+README_full.md
+STATUS.md
+TODO.md
+docs/verifier-README.md
+docs/verifier-TODO.md
