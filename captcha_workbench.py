@@ -22,6 +22,16 @@ from pydantic import BaseModel
 
 DEFAULT_OUTPUT_PARENT = Path(os.environ.get('INVOICE_OUTPUT_PARENT', str(Path.home() / 'invoices_output')))
 
+
+def _load_default_dirs() -> tuple[Path, Path]:
+    """Load default input/output dirs, preferring env vars, falling back to ~/invoices."""
+    inp = Path(os.environ.get('INVOICE_INPUT_DIR', str(Path.home() / 'invoices')))
+    out = Path(os.environ.get('INVOICE_OUTPUT_DIR', str(DEFAULT_OUTPUT_PARENT)))
+    return inp, out
+
+
+DEFAULT_INPUT_DIR, DEFAULT_OUTPUT_DIR = _load_default_dirs()
+
 BASE_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = BASE_DIR.parent
 VERIFIER_DIR = WORKSPACE_DIR / 'invoice-verifier'
@@ -41,8 +51,8 @@ try:
 except Exception:
     solve_captcha = None
 
-DEFAULT_INPUT_DIR = Path(os.environ.get('INVOICE_INPUT_DIR', str(Path.home() / 'invoices')))
-DEFAULT_OUTPUT_DIR = Path(os.environ.get('INVOICE_OUTPUT_DIR', str(Path.home() / 'invoices_output')))
+DEFAULT_INPUT_DIR = _load_default_dirs()[0]
+DEFAULT_OUTPUT_DIR = _load_default_dirs()[1]
 INPUT_DIR = DEFAULT_INPUT_DIR
 OUTPUT_DIR = DEFAULT_OUTPUT_DIR
 UPLOAD_DIR = OUTPUT_DIR / 'uploads'
@@ -811,6 +821,7 @@ def api_tasks():
         **summarize_tasks(tasks),
         'output_dir': str(OUTPUT_DIR),
         'output_dirs': list_output_dirs(),
+        'input_dir': str(INPUT_DIR),
         'tabs': invoice_tabs_payload(invoices),
     }
 
@@ -1396,6 +1407,10 @@ async function refreshAllData(showMessage='') {
   const tasksData = await tasksRes.json();
   const invData = await invRes.json();
   renderOutputDirs(tasksData);
+  if (tasksData.input_dir) {
+    const inputEl = document.getElementById('input-dir');
+    if (inputEl && !inputEl.value) inputEl.value = tasksData.input_dir;
+  }
   lastTasks = tasksData.tasks || [];
   lastParsedInvoices = invData.invoices || [];
   renderTabs(invData.tabs || tasksData.tabs || {all:0,pending:0,partial:0,passed:0,failed:0});
