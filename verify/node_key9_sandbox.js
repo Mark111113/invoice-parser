@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 const fs = require('fs');
+const path = require('path');
 const vm = require('vm');
 
 function encodeBase64(s){
@@ -135,7 +136,7 @@ function buildContext(opts = {}) {
 }
 
 function loadNnyd(context) {
-  const code = fs.readFileSync('/root/.openclaw/workspace/projects/invoice-verifier/upstream_js/wlop.js', 'utf8');
+  const code = fs.readFileSync(path.resolve(__dirname, 'upstream_js', 'wlop.js'), 'utf8');
   vm.createContext(context);
   vm.runInContext(code, context, { timeout: 20000 });
   if (!context.$ || !context.$.nnyd) throw new Error('$.nnyd not initialized');
