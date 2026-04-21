@@ -47,7 +47,7 @@ except Exception:
     OCRServiceClient = None
 
 try:
-    from captcha_solver import solve_captcha  # type: ignore
+    from verify.captcha_solver import solve_captcha  # type: ignore
 except Exception:
     solve_captcha = None
 
