@@ -1363,14 +1363,26 @@ let lastTasks = [];
 let lastTabs = {all:0,pending:0,partial:0,passed:0,failed:0};
 let bulkPollTimer = null;
 
+window.addEventListener('error', function (e) {
+  try {
+    var box = document.getElementById('result-box');
+    if (box) {
+      box.textContent = '前端脚本错误: ' + (e && e.message ? e.message : 'unknown error');
+      box.className = 'err';
+    }
+  } catch (_) {}
+});
+
 function basenameOfPath(p) {
   if (!p) return '';
   return p.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
 }
 
 function getChosenOutputDir() {
-  const inputVal = (document.getElementById('output-dir-input')?.value || '').trim();
-  const selectVal = (document.getElementById('output-dir-select')?.value || '').trim();
+  const inputEl = document.getElementById('output-dir-input');
+  const selectEl = document.getElementById('output-dir-select');
+  const inputVal = ((inputEl && inputEl.value) || '').trim();
+  const selectVal = ((selectEl && selectEl.value) || '').trim();
   return inputVal || selectVal;
 }
 
