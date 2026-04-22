@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 import argparse
-import os
 import hashlib
 import html
 import json
+import os
 import re
 import subprocess
 import xml.etree.ElementTree as ET
@@ -205,7 +205,7 @@ def sha256_file(path: Path) -> str:
 
 def extract_text_pdftotext(path: Path) -> str:
     try:
-        return subprocess.check_output(['pdftotext', str(path), '-'], stderr=subprocess.DEVNULL, text=True)
+        return subprocess.check_output(['pdftotext', str(path), '-'], stderr=subprocess.DEVNULL, text=True, encoding='utf-8', errors='replace')
     except Exception:
         return ''
 
