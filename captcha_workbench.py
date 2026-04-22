@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Response
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from pydantic import BaseModel
 
@@ -284,7 +284,7 @@ def capture_verify_screenshot_for_invoice(file_hash: str) -> dict[str, Any]:
     env.setdefault('XAUTHORITY', '/home/li/.Xauthority')
 
     try:
-        proc = subprocess.run(cmd, cwd=str(BASE_DIR), env=env, capture_output=True, text=True, timeout=120, encoding='utf-8', errors='replace')
+        proc = subprocess.run(cmd, cwd=str(BASE_DIR), env=env, capture_output=True, text=True, timeout=120)
         stdout = proc.stdout
         stderr = proc.stderr
         returncode = proc.returncode
@@ -831,9 +831,7 @@ def run_bulk_verify_worker(tasks_snapshot: list[dict[str, Any]]) -> None:
 # ── API endpoints ────────────────────────────────────────────────
 
 @app.get('/api/tasks')
-def api_tasks(response: Response):
-    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    response.headers['Pragma'] = 'no-cache'
+def api_tasks():
     tasks = load_tasks()
     invoices = enrich_invoice_sources(load_parsed_invoices())
     return {
@@ -926,9 +924,7 @@ def api_parse_input_dir(body: ParseInputDirRequest):
 
 
 @app.get('/api/parsed_invoices')
-def api_parsed_invoices(response: Response):
-    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    response.headers['Pragma'] = 'no-cache'
+def api_parsed_invoices():
     invoices = enrich_invoice_sources(load_parsed_invoices())
     return {
         'count': len(invoices),
@@ -1033,8 +1029,7 @@ async def api_upload_pdfs(files: list[UploadFile] = File(...)):
         }
 
     try:
-        output_parent = OUTPUT_DIR.parent if OUTPUT_DIR.name.startswith('发票_解析结果') else OUTPUT_DIR
-        routed = merge_records_into_entity_dirs(new_records, move_uploaded_sources=True, output_parent=output_parent)
+        routed = merge_records_into_entity_dirs(new_records, move_uploaded_sources=True, output_parent=OUTPUT_DIR.parent)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'entity routing failed: {exc}')
 
@@ -1052,71 +1047,6 @@ async def api_upload_pdfs(files: list[UploadFile] = File(...)):
         'task_count': len(tasks),
         'output_dir': str(OUTPUT_DIR),
         'routed_outputs': routed,
-    }
-
-
-class AutoVerifyRequest(BaseModel):
-    file_hash: str
-
-
-@app.post('/api/auto_verify_screenshot')
-def api_auto_verify_screenshot(body: AutoVerifyRequest):
-    """One-click: auto-verify with OCR captcha + screenshot (no manual input)."""
-    inv = find_invoice_by_hash(body.file_hash)
-    verify_status = inv.get('verify_status', '')
-    if verify_status not in ('未查验', '待查验', ''):
-        raise HTTPException(status_code=400, detail=f'只能对待查验的发票执行一键验证+截图，当前状态: {verify_status or "未查验"}')
-
-    task = find_task_for_invoice(inv) or build_ephemeral_task_from_invoice(inv)
-    runtime_dir = OUTPUT_DIR
-    temp_tasks_file = RESULTS_DIR / 'screenshot_task.json'
-    save_json(temp_tasks_file, [task])
-
-    cmd = [
-        sys.executable,
-        str(BASE_DIR / 'verify_browser_assist.py'),
-        '--tasks-file', str(temp_tasks_file),
-        '--max-retries', '5',
-        '--no-manual-captcha',
-    ]
-    env = os.environ.copy()
-    env['VERIFY_RUNTIME_DIR'] = str(runtime_dir)
-    env.setdefault('DISPLAY', ':0')
-    env.setdefault('XAUTHORITY', '/home/li/.Xauthority')
-
-    try:
-        proc = subprocess.run(cmd, cwd=str(BASE_DIR), env=env, capture_output=True, text=True, timeout=180, encoding='utf-8', errors='replace')
-        stdout = proc.stdout
-        stderr = proc.stderr
-        returncode = proc.returncode
-    except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout or ''
-        stderr = (exc.stderr or '') + '\n[timeout] verify_browser_assist exceeded 180s'
-        returncode = 124
-    except Exception as exc:
-        stdout = ''
-        stderr = f'[spawn-error] {exc}'
-        returncode = 500
-
-    try:
-        apply_results()
-    except Exception:
-        pass
-
-    invoices = load_parsed_invoices()
-    refreshed = next((x for x in invoices if x.get('file_hash') == body.file_hash), inv)
-    screenshot_path = refreshed.get('verify_screenshot_path', '')
-    new_status = refreshed.get('verify_status', verify_status)
-
-    return {
-        'ok': bool(screenshot_path or new_status in ('查验通过', '查验成功')),
-        'file_hash': body.file_hash,
-        'file_name': inv.get('file_name', ''),
-        'verify_status': new_status,
-        'verify_screenshot_path': screenshot_path,
-        'stdout': str(stdout)[-4000:],
-        'stderr': str(stderr)[-2000:],
-        'returncode': returncode,
     }
 
 
@@ -1274,8 +1204,6 @@ body { font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif; margin:
 .container { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; }
 .panel { border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
 .task, .invoice-item { border: 1px solid #eee; border-radius: 10px; padding: 10px; margin-bottom: 10px; }
-.actions { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
-.actions label { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .task button, .invoice-item button, .actions button, .ocr button { margin-right: 8px; margin-top: 6px; }
 #captcha-img { max-width: 100%; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; }
 code { background: #f4f4f4; padding: 2px 6px; border-radius: 6px; }
@@ -1284,8 +1212,8 @@ code { background: #f4f4f4; padding: 2px 6px; border-radius: 6px; }
 .warn { color: #b54708; }
 .err { color: #c53030; }
 .section-title { font-size: 15px; font-weight: 600; margin: 12px 0 6px 0; padding-bottom: 4px; border-bottom: 1px solid #eee; }
-input[type=text] { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; max-width: 100%; }
-select { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; max-width: 100%; }
+input[type=text] { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+select { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
 button { padding: 6px 14px; border-radius: 6px; border: 1px solid #bbb; background: #f9f9f9; cursor: pointer; font-size: 14px; }
 button:hover { background: #e8e8e8; }
 button.primary { background: #1677ff; color: #fff; border-color: #1677ff; }
@@ -1299,9 +1227,6 @@ button.primary:hover { background: #4096ff; }
 #tabs-bar button.active { background:#1677ff; color:#fff; border-color:#1677ff; }
 button.danger { background:#fff1f0; color:#c53030; border-color:#ffccc7; }
 #result-box { white-space: pre-wrap; background: #fafafa; padding: 12px; border-radius: 8px; min-height: 40px; font-size: 13px; }
-@media (max-width: 1200px) {
-  .container { grid-template-columns: 1fr; }
-}
 </style>
 </head>
 <body>
@@ -1311,9 +1236,9 @@ button.danger { background:#fff1f0; color:#c53030; border-color:#ffccc7; }
   <span class='section-title' style='display:inline; margin:0; border:0;'>📂 输入设置</span>
 </div>
 <div class='actions'>
-  <label>输入目录：<input id='input-dir' type='text' value='' placeholder='选择或输入发票目录路径' style='width:min(520px, 90vw);' /></label>
-  <label>输出目录：<select id='output-dir-select' style='min-width:280px; max-width:min(520px, 90vw);'></select></label>
-  <label>手填/新建输出目录：<input id='output-dir-input' type='text' value='' placeholder='首次启动可直接填一个目录，如 D:\\invoice_output' style='width:min(520px, 90vw);' /></label>
+  <label>输入目录：<input id='input-dir' type='text' value='' placeholder='选择或输入发票目录路径' style='width:380px; margin-right:6px;' /></label>
+  <label>输出目录：<select id='output-dir-select' style='min-width:300px; margin-right:6px;'></select></label>
+  <label>手填/新建输出目录：<input id='output-dir-input' type='text' value='' placeholder='首次启动可直接填一个目录，如 D:\\invoice_output' style='width:380px; margin-right:6px;' /></label>
   <button onclick='applyOutputDirInput()'>使用/创建该目录</button>
   <button class='primary' onclick='parseInputDir()'>解析</button>
   <button onclick='rebuildTasks()'>重建查验任务</button>
@@ -1363,26 +1288,14 @@ let lastTasks = [];
 let lastTabs = {all:0,pending:0,partial:0,passed:0,failed:0};
 let bulkPollTimer = null;
 
-window.addEventListener('error', function (e) {
-  try {
-    var box = document.getElementById('result-box');
-    if (box) {
-      box.textContent = '前端脚本错误: ' + (e && e.message ? e.message : 'unknown error');
-      box.className = 'err';
-    }
-  } catch (_) {}
-});
-
 function basenameOfPath(p) {
   if (!p) return '';
   return p.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
 }
 
 function getChosenOutputDir() {
-  const inputEl = document.getElementById('output-dir-input');
-  const selectEl = document.getElementById('output-dir-select');
-  const inputVal = ((inputEl && inputEl.value) || '').trim();
-  const selectVal = ((selectEl && selectEl.value) || '').trim();
+  const inputVal = (document.getElementById('output-dir-input')?.value || '').trim();
+  const selectVal = (document.getElementById('output-dir-select')?.value || '').trim();
   return inputVal || selectVal;
 }
 
@@ -1497,7 +1410,6 @@ function renderInvoiceList(invoices, tasks) {
     let actions = '';
     if (taskId && !['passed','failed'].includes(currentTab)) {
       actions += `<button onclick="fetchCaptcha('${taskId}')">取验证码</button>`;
-      actions += `<button class='primary' onclick="autoVerifyScreenshot('${inv.file_hash}')">一键验证+截图</button>`;
     }
     if (vStatus === '查验通过') {
       actions += `<button onclick="captureVerifyScreenshot('${inv.file_hash}')">补截图</button>`;
@@ -1527,10 +1439,9 @@ function renderCurrentList() {
 }
 
 async function refreshAllData(showMessage='') {
-  const ts = Date.now();
   const [tasksRes, invRes] = await Promise.all([
-    fetch(`/api/tasks?_=${ts}`, { cache: 'no-store' }),
-    fetch(`/api/parsed_invoices?_=${ts}`, { cache: 'no-store' })
+    fetch('/api/tasks'),
+    fetch('/api/parsed_invoices')
   ]);
   const tasksData = await tasksRes.json();
   const invData = await invRes.json();
@@ -1741,30 +1652,6 @@ async function captureVerifyScreenshot(fileHash) {
   document.getElementById('result-box').textContent = ['✅ 补截图完成', (data.verify_screenshot_path || '')].join(String.fromCharCode(10));
 }
 
-async function autoVerifyScreenshot(fileHash) {
-  document.getElementById('result-box').textContent = '⏳ 正在一键验证+截图（自动识别验证码，最多重试5次）...';
-  document.getElementById('result-box').className = 'warn';
-  const res = await fetch('/api/auto_verify_screenshot', {
-    method: 'POST', headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({file_hash: fileHash})
-  });
-  const data = await res.json();
-  document.getElementById('result-box').className = '';
-  if (!res.ok) {
-    document.getElementById('result-box').textContent = '❌ ' + JSON.stringify(data, null, 2);
-    await refreshAllData();
-    return;
-  }
-  const status = data.verify_status || '未知';
-  const screenshot = data.verify_screenshot_path || '';
-  const summary = data.ok
-    ? `✅ 验证完成：${status}${screenshot ? '\n截图：' + screenshot : ''}`
-    : `⚠️ 验证结果：${status}\n${data.stdout ? data.stdout.slice(-500) : ''}`;
-  document.getElementById('result-box').textContent = summary;
-  currentTab = 'all';
-  await refreshAllData();
-}
-
 async function resetInvoiceToPending(fileHash) {
   const confirmed = window.confirm('确认将这条记录重置为待查验？');
   if (!confirmed) return;
@@ -1868,10 +1755,7 @@ pollBulkStatus();
 
 @app.get('/', response_class=HTMLResponse)
 def index():
-    return HTMLResponse(INDEX_HTML, headers={
-        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-        'Pragma': 'no-cache',
-    })
+    return HTMLResponse(INDEX_HTML)
 
 
 # ── Main ─────────────────────────────────────────────────────────
