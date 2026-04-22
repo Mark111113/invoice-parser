@@ -1029,7 +1029,8 @@ async def api_upload_pdfs(files: list[UploadFile] = File(...)):
         }
 
     try:
-        routed = merge_records_into_entity_dirs(new_records, move_uploaded_sources=True, output_parent=OUTPUT_DIR.parent)
+        output_parent = OUTPUT_DIR.parent if OUTPUT_DIR.name.startswith('发票_解析结果') else OUTPUT_DIR
+        routed = merge_records_into_entity_dirs(new_records, move_uploaded_sources=True, output_parent=output_parent)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f'entity routing failed: {exc}')
 
