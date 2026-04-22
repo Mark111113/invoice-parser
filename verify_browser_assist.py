@@ -25,6 +25,12 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Ensure verify/ (where captcha_solver.py lives) is importable when running as a script
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_VERIFY_DIR = _SCRIPT_DIR / 'verify'
+if str(_VERIFY_DIR) not in sys.path:
+    sys.path.insert(0, str(_VERIFY_DIR))
+
 from playwright.sync_api import sync_playwright
 
 from verify.verify_contract import build_standard_result, extract_update_from_result
@@ -117,6 +123,30 @@ def refill_form(page, inv_num: str, date_str: str, total_amount: str) -> None:
     page.fill('#kjje', amount_str)
     page.dispatch_event('#kjje', 'blur')
     page.wait_for_timeout(400)
+
+
+def _backfill_screenshot_only(task: dict, screenshot_path: str) -> None:
+    """Only update verify_screenshot_path in ledger, preserving all other fields."""
+    import pandas as pd
+    if not LEDGER_FILE.exists():
+        return
+    df = pd.read_csv(LEDGER_FILE, dtype=str).fillna('')
+    inv_num = (task.get('invoice', {}) or {}).get('invoice_number', '')
+    mask = df['invoice_number'].astype(str) == str(inv_num) if 'invoice_number' in df.columns and inv_num else None
+    if mask is None or not mask.any():
+        # Try file_hash
+        fh = (task.get('invoice', {}) or {}).get('file_hash', '')
+        if fh and 'file_hash' in df.columns:
+            mask = df['file_hash'].astype(str) == str(fh)
+    if mask is None or not mask.any():
+        print(f'  → 台账中未找到匹配行，跳过回填')
+        return
+    df.loc[mask, 'verify_screenshot_path'] = screenshot_path
+    try:
+        df.to_csv(LEDGER_FILE, index=False, encoding='utf-8-sig')
+        print(f'  → 已回填截图路径到台账')
+    except Exception as e:
+        print(f'  → 台账回填失败: {e}')
 
 
 def save_result(task: dict, result: dict, screenshot_path: str, raw_response: str) -> Path:
@@ -365,8 +395,21 @@ def process_one(page, task: dict, task_index: int, headless: bool, max_retries: 
 
         if not yzm:
             if no_manual_captcha:
+                if preserve_existing_status and attempt == max_retries:
+                    # 补截图模式：验证码识别失败，截当前页面作为截图记录
+                    print(f'  自动识别失败，补截图模式下截取当前页面状态...')
+                    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+                    ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+                    screenshot_path = str(SCREENSHOTS_DIR / f'{inv_num}_{ts}_captcha_failed.png')
+                    try:
+                        page.screenshot(path=screenshot_path, full_page=True)
+                        print(f'  页面截图已保存: {screenshot_path}')
+                        # 回填截图路径到台账
+                        _backfill_screenshot_only(task, screenshot_path)
+                    except Exception as e:
+                        print(f'  页面截图也失败: {e}')
+                    return None
                 print(f'  自动识别失败，且已禁用人工输入（第 {attempt}/{max_retries} 次）')
-                return None
             print(f'  请查看图片并输入验证码（第 {attempt}/{max_retries} 次）')
             try:
                 yzm = input('  验证码 > ').strip()
