@@ -284,7 +284,7 @@ def capture_verify_screenshot_for_invoice(file_hash: str) -> dict[str, Any]:
     env.setdefault('XAUTHORITY', '/home/li/.Xauthority')
 
     try:
-        proc = subprocess.run(cmd, cwd=str(BASE_DIR), env=env, capture_output=True, text=True, timeout=120)
+        proc = subprocess.run(cmd, cwd=str(BASE_DIR), env=env, capture_output=True, text=True, timeout=120, encoding='utf-8', errors='replace')
         stdout = proc.stdout
         stderr = proc.stderr
         returncode = proc.returncode

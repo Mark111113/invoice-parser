@@ -388,9 +388,9 @@ def process_one(page, task: dict, task_index: int, headless: bool, max_retries: 
                     auto_key4 = '00'
 
                 yzm = solve_captcha_from_file(str(captcha_path), auto_key4)
-                print(f'  🤖 自动识别 (key4={auto_key4}): {yzm}')
+                print(f'  [OCR] 自动识别 (key4={auto_key4}): {yzm}')
             except Exception as e:
-                print(f'  🤖 自动识别失败: {e}')
+                print(f'  [OCR] 自动识别失败: {e}')
                 yzm = ''
 
         if not yzm:
@@ -517,7 +517,7 @@ def main():
                 if result:
                     results.append(result)
                     if i < len(tasks) - 1:
-                        print(f'\n  ✅ 第 {i} 张完成，准备处理下一张...')
+                        print(f'\n  [OK] 第 {i} 张完成，准备处理下一张...')
             except KeyboardInterrupt:
                 print('\n\n用户中断，退出。')
                 break
@@ -533,8 +533,8 @@ def main():
         print(f'查验完成，共处理 {len(results)} 张发票:')
         passed = sum(1 for r in results if r.get('is_success'))
         failed = len(results) - passed
-        print(f'  ✅ 通过: {passed}')
-        print(f'  ❌ 未通过: {failed}')
+        print(f'  [OK] 通过: {passed}')
+        print(f'  [FAIL] 未通过: {failed}')
         print(f'结果目录: {RESULTS_DIR}')
         print(f'台账文件: {LEDGER_FILE}')
         print(f'{"="*60}')
