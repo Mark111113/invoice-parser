@@ -1467,6 +1467,7 @@ function renderInvoiceList(invoices, tasks) {
     let actions = '';
     if (taskId && !['passed','failed'].includes(currentTab)) {
       actions += `<button onclick="fetchCaptcha('${taskId}')">取验证码</button>`;
+      actions += `<button class='primary' onclick="autoVerifyScreenshot('${inv.file_hash}')">一键验证+截图</button>`;
     }
     if (vStatus === '查验通过') {
       actions += `<button onclick="captureVerifyScreenshot('${inv.file_hash}')">补截图</button>`;
@@ -1707,6 +1708,30 @@ async function captureVerifyScreenshot(fileHash) {
   }
   await refreshAllData();
   document.getElementById('result-box').textContent = ['✅ 补截图完成', (data.verify_screenshot_path || '')].join(String.fromCharCode(10));
+}
+
+async function autoVerifyScreenshot(fileHash) {
+  document.getElementById('result-box').textContent = '⏳ 正在一键验证+截图（自动识别验证码，最多重试5次）...';
+  document.getElementById('result-box').className = 'warn';
+  const res = await fetch('/api/auto_verify_screenshot', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({file_hash: fileHash})
+  });
+  const data = await res.json();
+  document.getElementById('result-box').className = '';
+  if (!res.ok) {
+    document.getElementById('result-box').textContent = '❌ ' + JSON.stringify(data, null, 2);
+    await refreshAllData();
+    return;
+  }
+  const status = data.verify_status || '未知';
+  const screenshot = data.verify_screenshot_path || '';
+  const summary = data.ok
+    ? ('✅ 验证完成：' + status + (screenshot ? '\n截图：' + screenshot : ''))
+    : ('⚠️ 验证结果：' + status + '\n' + (data.stdout ? data.stdout.slice(-500) : ''));
+  document.getElementById('result-box').textContent = summary;
+  currentTab = 'all';
+  await refreshAllData();
 }
 
 async function resetInvoiceToPending(fileHash) {
