@@ -1729,10 +1729,10 @@ async function autoVerifyScreenshot(fileHash) {
   var summary;
   if (data.ok) {
     summary = '✅ 验证完成：' + status;
-    if (screenshot) { summary = summary + '\n截图：' + screenshot; }
+    if (screenshot) { summary = summary + String.fromCharCode(10) + '截图：' + screenshot; }
   } else {
     summary = '⚠️ 验证结果：' + status;
-    if (data.stdout) { summary = summary + '\n' + data.stdout.slice(-500); }
+    if (data.stdout) { summary = summary + String.fromCharCode(10) + data.stdout.slice(-500); }
   }
   document.getElementById('result-box').textContent = summary;
   currentTab = 'all';
