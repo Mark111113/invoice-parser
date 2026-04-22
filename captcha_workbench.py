@@ -1773,6 +1773,16 @@ def main() -> None:
         INPUT_DIR = Path(args.input_dir)
     set_output_dir(args.output_dir)
 
+    # Auto-download wlop.js on first run (needed for captcha verification)
+    try:
+        from verify.run_verifier import ensure_wlop_js
+        wlop = ensure_wlop_js()
+        print(f'[startup] wlop.js ready: {wlop} ({wlop.stat().st_size} bytes)')
+    except Exception as exc:
+        print(f'[startup] ⚠️ wlop.js auto-download failed: {exc}')
+        print('[startup] 验证码查验功能将不可用。请检查网络连接或手动下载 wlop.js')
+        print('[startup]   参考 README 中 "手动下载 wlop.js" 章节')
+
     import uvicorn
     uvicorn.run(app, host=args.host, port=args.port)
 

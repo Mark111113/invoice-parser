@@ -180,6 +180,22 @@ def run_js_key9(fpdm: str, fphm: str, yzm_publickey: str, cy_arg: str) -> dict[s
 
 
 WLOP_JS_URL = 'https://inv-veri.chinatax.gov.cn/js/wlop.js'
+WLOP_JS_MIRROR_URL = 'https://raw.githubusercontent.com/Mark111113/invoice-parser-assets/master/wlop.js'
+
+
+def _download_wlop(url: str) -> bytes:
+    """Download wlop.js from a given URL, return raw bytes."""
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except Exception:
+        pass
+    resp = requests.get(url, headers={
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
+        'Referer': 'https://inv-veri.chinatax.gov.cn/',
+    }, verify=False, timeout=60)
+    resp.raise_for_status()
+    return resp.content
 
 
 def ensure_wlop_js() -> Path:
@@ -188,22 +204,27 @@ def ensure_wlop_js() -> Path:
     if wlop_path.exists() and wlop_path.stat().st_size > 10000:
         return wlop_path
     wlop_path.parent.mkdir(parents=True, exist_ok=True)
-    print(f'[verify] Downloading wlop.js from {WLOP_JS_URL} ...')
-    try:
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-    except Exception:
-        pass
-    resp = requests.get(WLOP_JS_URL, headers={
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
-        'Referer': 'https://inv-veri.chinatax.gov.cn/',
-    }, verify=False, timeout=60)
-    resp.raise_for_status()
-    if len(resp.content) < 10000:
-        raise RuntimeError(f'Downloaded wlop.js too small ({len(resp.content)} bytes), likely not the real file')
-    wlop_path.write_bytes(resp.content)
-    print(f'[verify] wlop.js saved ({len(resp.content)} bytes)')
-    return wlop_path
+
+    urls = [WLOP_JS_URL]
+    if WLOP_JS_MIRROR_URL not in urls:
+        urls.append(WLOP_JS_MIRROR_URL)
+
+    last_err = None
+    for url in urls:
+        print(f'[verify] Downloading wlop.js from {url} ...')
+        try:
+            content = _download_wlop(url)
+            if len(content) < 10000:
+                last_err = RuntimeError(f'Downloaded too small ({len(content)} bytes), not the real file')
+                print(f'[verify] {last_err}')
+                continue
+            wlop_path.write_bytes(content)
+            print(f'[verify] wlop.js saved ({len(content)} bytes)')
+            return wlop_path
+        except Exception as exc:
+            last_err = exc
+            print(f'[verify] Download failed: {exc}')
+    raise RuntimeError(f'wlop.js 下载失败（所有源均不可用）: {last_err}')
 
 
 def append_flwq39(url: str, params: dict[str, Any]) -> str:
