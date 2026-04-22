@@ -1051,6 +1051,71 @@ async def api_upload_pdfs(files: list[UploadFile] = File(...)):
     }
 
 
+class AutoVerifyRequest(BaseModel):
+    file_hash: str
+
+
+@app.post('/api/auto_verify_screenshot')
+def api_auto_verify_screenshot(body: AutoVerifyRequest):
+    """One-click: auto-verify with OCR captcha + screenshot (no manual input)."""
+    inv = find_invoice_by_hash(body.file_hash)
+    verify_status = inv.get('verify_status', '')
+    if verify_status not in ('未查验', '待查验', ''):
+        raise HTTPException(status_code=400, detail=f'只能对待查验的发票执行一键验证+截图，当前状态: {verify_status or "未查验"}')
+
+    task = find_task_for_invoice(inv) or build_ephemeral_task_from_invoice(inv)
+    runtime_dir = OUTPUT_DIR
+    temp_tasks_file = RESULTS_DIR / 'screenshot_task.json'
+    save_json(temp_tasks_file, [task])
+
+    cmd = [
+        sys.executable,
+        str(BASE_DIR / 'verify_browser_assist.py'),
+        '--tasks-file', str(temp_tasks_file),
+        '--max-retries', '5',
+        '--no-manual-captcha',
+    ]
+    env = os.environ.copy()
+    env['VERIFY_RUNTIME_DIR'] = str(runtime_dir)
+    env.setdefault('DISPLAY', ':0')
+    env.setdefault('XAUTHORITY', '/home/li/.Xauthority')
+
+    try:
+        proc = subprocess.run(cmd, cwd=str(BASE_DIR), env=env, capture_output=True, text=True, timeout=180, encoding='utf-8', errors='replace')
+        stdout = proc.stdout
+        stderr = proc.stderr
+        returncode = proc.returncode
+    except subprocess.TimeoutExpired as exc:
+        stdout = exc.stdout or ''
+        stderr = (exc.stderr or '') + '\n[timeout] verify_browser_assist exceeded 180s'
+        returncode = 124
+    except Exception as exc:
+        stdout = ''
+        stderr = f'[spawn-error] {exc}'
+        returncode = 500
+
+    try:
+        apply_results()
+    except Exception:
+        pass
+
+    invoices = load_parsed_invoices()
+    refreshed = next((x for x in invoices if x.get('file_hash') == body.file_hash), inv)
+    screenshot_path = refreshed.get('verify_screenshot_path', '')
+    new_status = refreshed.get('verify_status', verify_status)
+
+    return {
+        'ok': bool(screenshot_path or new_status in ('查验通过', '查验成功')),
+        'file_hash': body.file_hash,
+        'file_name': inv.get('file_name', ''),
+        'verify_status': new_status,
+        'verify_screenshot_path': screenshot_path,
+        'stdout': str(stdout)[-4000:],
+        'stderr': str(stderr)[-2000:],
+        'returncode': returncode,
+    }
+
+
 @app.post('/api/capture_verify_screenshot')
 def api_capture_verify_screenshot(body: CaptureScreenshotRequest):
     return capture_verify_screenshot_for_invoice(body.file_hash)
@@ -1411,6 +1476,7 @@ function renderInvoiceList(invoices, tasks) {
     let actions = '';
     if (taskId && !['passed','failed'].includes(currentTab)) {
       actions += `<button onclick="fetchCaptcha('${taskId}')">取验证码</button>`;
+      actions += `<button class='primary' onclick="autoVerifyScreenshot('${inv.file_hash}')">一键验证+截图</button>`;
     }
     if (vStatus === '查验通过') {
       actions += `<button onclick="captureVerifyScreenshot('${inv.file_hash}')">补截图</button>`;
@@ -1651,6 +1717,30 @@ async function captureVerifyScreenshot(fileHash) {
   }
   await refreshAllData();
   document.getElementById('result-box').textContent = ['✅ 补截图完成', (data.verify_screenshot_path || '')].join(String.fromCharCode(10));
+}
+
+async function autoVerifyScreenshot(fileHash) {
+  document.getElementById('result-box').textContent = '⏳ 正在一键验证+截图（自动识别验证码，最多重试5次）...';
+  document.getElementById('result-box').className = 'warn';
+  const res = await fetch('/api/auto_verify_screenshot', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({file_hash: fileHash})
+  });
+  const data = await res.json();
+  document.getElementById('result-box').className = '';
+  if (!res.ok) {
+    document.getElementById('result-box').textContent = '❌ ' + JSON.stringify(data, null, 2);
+    await refreshAllData();
+    return;
+  }
+  const status = data.verify_status || '未知';
+  const screenshot = data.verify_screenshot_path || '';
+  const summary = data.ok
+    ? `✅ 验证完成：${status}${screenshot ? '\n截图：' + screenshot : ''}`
+    : `⚠️ 验证结果：${status}\n${data.stdout ? data.stdout.slice(-500) : ''}`;
+  document.getElementById('result-box').textContent = summary;
+  currentTab = 'all';
+  await refreshAllData();
 }
 
 async function resetInvoiceToPending(fileHash) {

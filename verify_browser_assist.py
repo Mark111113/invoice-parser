@@ -409,7 +409,15 @@ def process_one(page, task: dict, task_index: int, headless: bool, max_retries: 
                     except Exception as e:
                         print(f'  页面截图也失败: {e}')
                     return None
-                print(f'  自动识别失败，且已禁用人工输入（第 {attempt}/{max_retries} 次）')
+                print(f'  自动识别失败，刷新验证码重试（第 {attempt}/{max_retries} 次）')
+                try:
+                    page.click('#yzm_img')
+                    page.wait_for_timeout(1500)
+                except Exception:
+                    page.reload(wait_until='domcontentloaded', timeout=60000)
+                    page.wait_for_timeout(2000)
+                    refill_form(page, inv_num, date_str, total_amount)
+                continue
             print(f'  请查看图片并输入验证码（第 {attempt}/{max_retries} 次）')
             try:
                 yzm = input('  验证码 > ').strip()
