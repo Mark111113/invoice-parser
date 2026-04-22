@@ -964,6 +964,149 @@ def api_bulk_stop():
     return {'ok': True, 'status': bulk_snapshot()}
 
 
+def run_bulk_auto_verify_worker(tasks_snapshot: list[dict[str, Any]]) -> None:
+    """Batch one-click auto-verify + screenshot via browser assist."""
+    if not tasks_snapshot:
+        return
+    with BULK_LOCK:
+        BULK_STATE.update({
+            'running': True,
+            'stop_requested': False,
+            'started_at': time.strftime('%Y-%m-%dT%H:%M:%S'),
+            'finished_at': '',
+            'total': len(tasks_snapshot),
+            'done': 0,
+            'success': 0,
+            'failed': 0,
+            'retrying': 0,
+            'current_task_id': '',
+            'current_invoice_number': '',
+            'current_attempt': 0,
+            'logs': [],
+        })
+    bulk_log('批量一键验证+截图开始，共 ' + str(len(tasks_snapshot)) + ' 张')
+
+    try:
+        temp_tasks_file = RESULTS_DIR / 'bulk_auto_verify_tasks.json'
+        save_json(temp_tasks_file, tasks_snapshot)
+
+        cmd = [
+            sys.executable,
+            str(BASE_DIR / 'verify_browser_assist.py'),
+            '--tasks-file', str(temp_tasks_file),
+            '--max-retries', '5',
+            '--no-manual-captcha',
+        ]
+        env = os.environ.copy()
+        env['VERIFY_RUNTIME_DIR'] = str(OUTPUT_DIR)
+        env.setdefault('DISPLAY', ':0')
+        env.setdefault('XAUTHORITY', '/home/li/.Xauthority')
+
+        proc = subprocess.Popen(
+            cmd, cwd=str(BASE_DIR), env=env,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding='utf-8', errors='replace',
+        )
+
+        current_invoice = ''
+        for line in proc.stdout:
+            line = line.rstrip()
+            if not line:
+                continue
+
+            # Parse progress from stdout
+            if '发票 #' in line:
+                parts = line.split('发票 #')
+                if len(parts) > 1:
+                    num_part = parts[1].strip().split(':')[0].strip()
+                    try:
+                        idx = int(num_part)
+                        if idx < len(tasks_snapshot):
+                            inv = (tasks_snapshot[idx].get('invoice') or {})
+                            current_invoice = inv.get('invoice_number', num_part)
+                            with BULK_LOCK:
+                                BULK_STATE['current_invoice_number'] = current_invoice
+                                BULK_STATE['current_attempt'] = 0
+                    except ValueError:
+                        pass
+
+            if '验证码错误' in line or '刷新重试' in line:
+                with BULK_LOCK:
+                    BULK_STATE['retrying'] += 1
+                    BULK_STATE['current_attempt'] += 1
+
+            if '[OCR]' in line:
+                ocr_text = line.split('[OCR]')[-1].strip() if '[OCR]' in line else ''
+                bulk_log((current_invoice or '?') + ' ' + line.strip())
+
+            if '查验结果:' in line or '返回码:' in line:
+                bulk_log((current_invoice or '?') + ' ' + line.strip())
+
+            if '[OK]' in line and '通过' in line:
+                bulk_log((current_invoice or '?') + ' [OK] 查验通过')
+                with BULK_LOCK:
+                    BULK_STATE['success'] += 1
+                    BULK_STATE['done'] += 1
+
+            if '达到最大重试次数' in line:
+                bulk_log((current_invoice or '?') + ' 验证码重试耗尽，跳过')
+                with BULK_LOCK:
+                    BULK_STATE['failed'] += 1
+                    BULK_STATE['done'] += 1
+
+            if '处理发票' in line and '出错' in line:
+                bulk_log(line.strip())
+                with BULK_LOCK:
+                    BULK_STATE['failed'] += 1
+                    BULK_STATE['done'] += 1
+
+            if '跳过此发票' in line or '查验按钮不可用' in line:
+                bulk_log((current_invoice or '?') + ' ' + line.strip())
+                with BULK_LOCK:
+                    BULK_STATE['failed'] += 1
+                    BULK_STATE['done'] += 1
+
+            # Handle stop request
+            with BULK_LOCK:
+                if BULK_STATE.get('stop_requested'):
+                    proc.terminate()
+                    bulk_log('用户停止批量任务')
+                    break
+
+        proc.wait(timeout=30)
+
+        # Apply results to ledger
+        try:
+            apply_results()
+            bulk_log('查验结果已同步到台账')
+        except Exception as e:
+            bulk_log('台账同步异常: ' + str(e))
+
+    except Exception as e:
+        bulk_log('批量任务异常: ' + str(e))
+    finally:
+        with BULK_LOCK:
+            BULK_STATE['running'] = False
+            BULK_STATE['finished_at'] = time.strftime('%Y-%m-%dT%H:%M:%S')
+            BULK_STATE['current_task_id'] = ''
+            BULK_STATE['current_invoice_number'] = ''
+            BULK_STATE['current_attempt'] = 0
+        bulk_log('批量一键验证+截图结束')
+
+
+@app.post('/api/bulk_auto_verify')
+def api_bulk_auto_verify():
+    with BULK_LOCK:
+        if BULK_STATE.get('running'):
+            raise HTTPException(status_code=400, detail='bulk task already running')
+    tasks_snapshot = load_tasks()
+    if not tasks_snapshot:
+        raise HTTPException(status_code=400, detail='no pending tasks')
+    t = threading.Thread(target=run_bulk_auto_verify_worker, args=(tasks_snapshot,), daemon=True)
+    t.start()
+    return {'ok': True, 'queued': len(tasks_snapshot), 'status': bulk_snapshot()}
+
+
 @app.post('/api/upload_pdfs')
 async def api_upload_pdfs(files: list[UploadFile] = File(...)):
     if not files:
@@ -1313,6 +1456,7 @@ button.danger { background:#fff1f0; color:#c53030; border-color:#ffccc7; }
   <span style='font-weight:600; margin-right:8px;'>🤖 批量查验：</span>
   <button class='primary' id='bulk-start-btn' onclick='startBulkVerify()'>开始批量查验当前待查验</button>
   <button id='bulk-stop-btn' onclick='stopBulkVerify()'>停止</button>
+  <button class='primary' id='bulk-auto-btn' onclick='startBulkAutoVerify()' style='margin-left:8px;'>批量一键验证+截图</button>
   <span id='bulk-summary' class='small' style='margin-left:12px;'></span>
 </div>
 
@@ -1529,6 +1673,8 @@ function renderBulkStatus(status) {
   logEl.textContent = (status.logs || []).join('\\n');
   startBtn.disabled = !!status.running;
   stopBtn.disabled = !status.running;
+  var autoBtn = document.getElementById('bulk-auto-btn');
+  if (autoBtn) { autoBtn.disabled = !!status.running; }
 }
 
 async function pollBulkStatus() {
@@ -1557,6 +1703,19 @@ async function startBulkVerify() {
   }
   renderBulkStatus(data.status || {});
   document.getElementById('result-box').textContent = `✅ 已启动批量查验，本轮快照 ${data.queued} 张`;
+  if (bulkPollTimer) clearTimeout(bulkPollTimer);
+  bulkPollTimer = setTimeout(pollBulkStatus, 800);
+}
+
+async function startBulkAutoVerify() {
+  const res = await fetch('/api/bulk_auto_verify', {method:'POST'});
+  const data = await res.json();
+  if (!res.ok) {
+    document.getElementById('result-box').textContent = JSON.stringify(data, null, 2);
+    return;
+  }
+  renderBulkStatus(data.status || {});
+  document.getElementById('result-box').textContent = '✅ 已启动批量一键验证+截图，本轮快照 ' + data.queued + ' 张（每张约30-80秒，请耐心等待）';
   if (bulkPollTimer) clearTimeout(bulkPollTimer);
   bulkPollTimer = setTimeout(pollBulkStatus, 800);
 }
