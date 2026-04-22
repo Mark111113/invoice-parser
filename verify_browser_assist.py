@@ -466,8 +466,22 @@ def process_one(page, task: dict, task_index: int, headless: bool, max_retries: 
         except Exception:
             pass
 
+        # Check page hint text first
         if '验证码' in yzm_info and '错' in yzm_info:
-            print('  ✗ 验证码错误，请重试')
+            print('  ✗ 验证码错误（页面提示），刷新重试')
+            try:
+                page.click('#yzm_img')
+                page.wait_for_timeout(1000)
+            except Exception:
+                page.reload(wait_until='domcontentloaded', timeout=60000)
+                page.wait_for_timeout(2000)
+                refill_form(page, inv_num, date_str, total_amount)
+            continue
+
+        # Also check the API response directly (key1=008 means captcha error)
+        resp_key1 = (captured.get('text') or '').find('"key1":"008"') >= 0
+        if resp_key1:
+            print('  ✗ 验证码错误（API 返回 008），刷新重试')
             try:
                 page.click('#yzm_img')
                 page.wait_for_timeout(1000)
