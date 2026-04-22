@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Response
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from pydantic import BaseModel
 
@@ -831,7 +831,9 @@ def run_bulk_verify_worker(tasks_snapshot: list[dict[str, Any]]) -> None:
 # ── API endpoints ────────────────────────────────────────────────
 
 @app.get('/api/tasks')
-def api_tasks():
+def api_tasks(response: Response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
     tasks = load_tasks()
     invoices = enrich_invoice_sources(load_parsed_invoices())
     return {
@@ -924,7 +926,9 @@ def api_parse_input_dir(body: ParseInputDirRequest):
 
 
 @app.get('/api/parsed_invoices')
-def api_parsed_invoices():
+def api_parsed_invoices(response: Response):
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
     invoices = enrich_invoice_sources(load_parsed_invoices())
     return {
         'count': len(invoices),
@@ -1511,9 +1515,10 @@ function renderCurrentList() {
 }
 
 async function refreshAllData(showMessage='') {
+  const ts = Date.now();
   const [tasksRes, invRes] = await Promise.all([
-    fetch('/api/tasks'),
-    fetch('/api/parsed_invoices')
+    fetch(`/api/tasks?_=${ts}`, { cache: 'no-store' }),
+    fetch(`/api/parsed_invoices?_=${ts}`, { cache: 'no-store' })
   ]);
   const tasksData = await tasksRes.json();
   const invData = await invRes.json();
@@ -1851,7 +1856,10 @@ pollBulkStatus();
 
 @app.get('/', response_class=HTMLResponse)
 def index():
-    return HTMLResponse(INDEX_HTML)
+    return HTMLResponse(INDEX_HTML, headers={
+        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+        'Pragma': 'no-cache',
+    })
 
 
 # ── Main ─────────────────────────────────────────────────────────
