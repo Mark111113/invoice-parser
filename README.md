@@ -6,15 +6,17 @@
 
 ### 核心能力
 - **多格式解析**：PDF（pdftotext）、XML（结构化）、OFD（ZIP/XML）
+- **碎片化 PDF 容错**：对 pdftotext layout 模式提取失败的 PDF，自动 fallback 到 raw 模式 + 特征词打分
 - **按购方自动分桶输出**：解析结果按购方实体自动路由到独立目录
 - **自动验证码识别**：ddddocr + 颜色过滤，约 67% 准确率（配合重试可达 96%）
 - **双轨查验**：API headless 批量查验 + 浏览器官方截图取证
+- **一键验证+截图**：单张 / 批量自动填表→识别验证码→查验→截图，全程无需人工干预
 - **Web 工作台**：http://localhost:8787
 
 ### 输入格式
 | 格式 | 解析方式 | 状态 |
 |------|---------|------|
-| PDF | pdftotext 提取文本 + 正则 | ✅ 稳定 |
+| PDF | pdftotext 提取文本 + 正则（layout + raw fallback） | ✅ 稳定 |
 | XML | etree 结构化解析 | ✅ 稳定 |
 | OFD | ZIP 解压 + XML 文本提取 | ⚠️ 基础实现（待真实样本验证） |
 
@@ -57,6 +59,12 @@
 - 自动填表 + 自动验证码 + 自动截图
 - 截图通过 HTTP 接口提供（支持 PNG/JPG）
 - 不会覆盖 API 查验结论，只回填截图路径
+
+### 一键验证+截图
+- **单张**：点击发票行的「一键验证+截图」按钮，自动完成填表→验证码识别→查验→截图
+- **批量**：点击「批量一键验证+截图」按钮，对所有待查验发票依次执行，实时显示进度
+- 验证码识别失败时自动刷新验证码重试（最多 5 次）
+- 全程无需人工干预；OCR 失败时仍会保存页面截图供人工复核
 
 ### 省级端点覆盖
 - ✅ 32/36 省份可用（2026-04-21 修正域名后实测）
@@ -140,7 +148,7 @@ python captcha_workbench.py --port 8787
 ```
 访问：<http://localhost:8787>
 
-> **`wlop.js` 自动下载：** 启动时会自动从税务局网站下载 `verify/upstream_js/wlop.js`（验证码签名所需）。如果自动下载失败（网络不通等），启动时会显示警告，验证码查验功能将不可用。此时可手动下载：
+> **`wlop.js` 自动下载：** 启动时会自动从税务局网站下载 `verify/upstream_js/wlop.js`（验证码签名所需）。如果税务局下载失败，会自动从 GitHub 镜像（`Mark111113/invoice-parser-assets`）下载。两者都失败时启动会显示警告，验证码查验功能将不可用。此时可手动下载：
 > ```bat
 > python -c "import requests; requests.packages.urllib3.disable_warnings(); r=requests.get('https://inv-veri.chinatax.gov.cn/js/wlop.js',verify=False,headers={'User-Agent':'Mozilla/5.0'}); open('verify/upstream_js/wlop.js','wb').write(r.content); print(f'downloaded {len(r.content)} bytes')"
 > ```
@@ -187,6 +195,9 @@ python build_verify_assets.py --output-dir D:\invoice_output\发票_解析结果
 | `/api/bulk_stop` | POST | 停止批量 |
 | `/api/bulk_status` | GET | 批量进度 |
 | `/api/capture_verify_screenshot` | POST | 单张补截图 |
+| `/api/auto_verify_screenshot` | POST | 单张一键验证+截图 |
+| `/api/bulk_auto_verify` | POST | 批量一键验证+截图 |
+| `/api/bulk_auto_verify_stop` | POST | 停止批量一键验证 |
 | `/api/screenshot/{file_hash}` | GET | 查看/下载截图（?format=jpg） |
 | `/api/reset_invoice_to_pending` | POST | 重置为待查验 |
 | `/api/delete_invoice` | POST | 删除发票记录 |
@@ -199,3 +210,36 @@ python build_verify_assets.py --output-dir D:\invoice_output\发票_解析结果
 - **颜色规则**：key4=01→红色, key4=03→蓝色, key4=00/02→全部
 - **准确率**：~67%（颜色验证码），配合 3 次重试 ~96%
 - **文件**：`captcha_solver.py`（在 invoice-verifier 项目中）
+
+## PDF 解析逻辑
+
+解析器（`parser.py`）对 PDF 发票采用两阶段文本提取 + 多层 fallback 策略：
+
+### 第一阶段：layout 模式（主解析）
+```
+pdftotext invoice.pdf -   # 默认 layout 模式，尽量保持表格对齐
+```
+用标准正则从 layout 文本中提取所有字段（发票号码、日期、金额、购销方、明细等）。
+大部分发票（苏州、深圳等）在此阶段即可完成解析。
+
+### 第二阶段：raw 模式（fragmented PDF fallback）
+```
+pdftotext -raw invoice.pdf -   # 按 PDF 内部顺序逐字输出
+```
+当 layout 模式提取的关键字段有空缺时，自动 fallback 到 raw 文本重试：
+
+| 字段 | Raw Fallback 策略 |
+|------|-------------------|
+| 开票日期 | 标签匹配（允许年月日间有空格）→ 纯数字块 `2025 11 22` 补零格式化 |
+| 价税合计 | 标签匹配 → `价税合计...¥52.50` → 大写金额+符号 `伍拾贰圆伍角整 ¥ 52.50` |
+| 购买方/销售方 | raw 文本重跑 `parse_buyer_seller` → 特征词打分（见下） |
+
+### 购买方/销售方识别（三层 fallback）
+
+1. **标准正则**：`购买方名称: xxx` / `销售方名称: xxx`（含空格容忍、compact 模式变体）
+2. **Raw 文本重试**：对 raw 文本再跑一遍标准正则
+3. **特征词打分**：当正则全部失败时（标签和名称被 PDF 碎片化打散到几十行外），扫描所有 `称: xxx` 出现位置，检查其后方是否出现销售方区域特征词（`复核` +2、`开票人` +2、`销售方` +1），得分最高的为销售方
+
+### 状态判定
+- 5 个关键字段（发票号码、开票日期、销售方名称、购买方名称、价税合计）全部提取到 → `parsed`
+- 缺任何一个 → `partial`（标记需人工审核）
