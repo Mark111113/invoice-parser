@@ -1270,6 +1270,8 @@ body { font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif; margin:
 .container { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; }
 .panel { border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
 .task, .invoice-item { border: 1px solid #eee; border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; }
+.actions label { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .task button, .invoice-item button, .actions button, .ocr button { margin-right: 8px; margin-top: 6px; }
 #captcha-img { max-width: 100%; border: 1px solid #ddd; border-radius: 8px; background: #fafafa; }
 code { background: #f4f4f4; padding: 2px 6px; border-radius: 6px; }
@@ -1278,8 +1280,8 @@ code { background: #f4f4f4; padding: 2px 6px; border-radius: 6px; }
 .warn { color: #b54708; }
 .err { color: #c53030; }
 .section-title { font-size: 15px; font-weight: 600; margin: 12px 0 6px 0; padding-bottom: 4px; border-bottom: 1px solid #eee; }
-input[type=text] { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
-select { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+input[type=text] { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; max-width: 100%; }
+select { padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; max-width: 100%; }
 button { padding: 6px 14px; border-radius: 6px; border: 1px solid #bbb; background: #f9f9f9; cursor: pointer; font-size: 14px; }
 button:hover { background: #e8e8e8; }
 button.primary { background: #1677ff; color: #fff; border-color: #1677ff; }
@@ -1293,6 +1295,9 @@ button.primary:hover { background: #4096ff; }
 #tabs-bar button.active { background:#1677ff; color:#fff; border-color:#1677ff; }
 button.danger { background:#fff1f0; color:#c53030; border-color:#ffccc7; }
 #result-box { white-space: pre-wrap; background: #fafafa; padding: 12px; border-radius: 8px; min-height: 40px; font-size: 13px; }
+@media (max-width: 1200px) {
+  .container { grid-template-columns: 1fr; }
+}
 </style>
 </head>
 <body>
@@ -1302,9 +1307,9 @@ button.danger { background:#fff1f0; color:#c53030; border-color:#ffccc7; }
   <span class='section-title' style='display:inline; margin:0; border:0;'>📂 输入设置</span>
 </div>
 <div class='actions'>
-  <label>输入目录：<input id='input-dir' type='text' value='' placeholder='选择或输入发票目录路径' style='width:380px; margin-right:6px;' /></label>
-  <label>输出目录：<select id='output-dir-select' style='min-width:300px; margin-right:6px;'></select></label>
-  <label>手填/新建输出目录：<input id='output-dir-input' type='text' value='' placeholder='首次启动可直接填一个目录，如 D:\\invoice_output' style='width:380px; margin-right:6px;' /></label>
+  <label>输入目录：<input id='input-dir' type='text' value='' placeholder='选择或输入发票目录路径' style='width:min(520px, 90vw);' /></label>
+  <label>输出目录：<select id='output-dir-select' style='min-width:280px; max-width:min(520px, 90vw);'></select></label>
+  <label>手填/新建输出目录：<input id='output-dir-input' type='text' value='' placeholder='首次启动可直接填一个目录，如 D:\\invoice_output' style='width:min(520px, 90vw);' /></label>
   <button onclick='applyOutputDirInput()'>使用/创建该目录</button>
   <button class='primary' onclick='parseInputDir()'>解析</button>
   <button onclick='rebuildTasks()'>重建查验任务</button>
