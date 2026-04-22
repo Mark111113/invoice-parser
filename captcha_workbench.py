@@ -117,6 +117,10 @@ class CaptureScreenshotRequest(BaseModel):
     file_hash: str
 
 
+class AutoVerifyRequest(BaseModel):
+    file_hash: str
+
+
 # ── Global helpers ───────────────────────────────────────────────
 
 def ensure_dirs() -> None:
@@ -1053,6 +1057,59 @@ async def api_upload_pdfs(files: list[UploadFile] = File(...)):
 @app.post('/api/capture_verify_screenshot')
 def api_capture_verify_screenshot(body: CaptureScreenshotRequest):
     return capture_verify_screenshot_for_invoice(body.file_hash)
+
+
+@app.post('/api/auto_verify_screenshot')
+def api_auto_verify_screenshot(body: AutoVerifyRequest):
+    inv = find_invoice_by_hash(body.file_hash)
+    if not inv:
+        raise HTTPException(status_code=404, detail='invoice not found')
+    verify_status = inv.get('verify_status', '')
+    if verify_status not in ('未查验', '待查验', ''):
+        raise HTTPException(status_code=400, detail='only pending: ' + (verify_status or 'pending'))
+
+    task = find_task_for_invoice(inv) or build_ephemeral_task_from_invoice(inv)
+    temp_tasks_file = RESULTS_DIR / 'screenshot_task.json'
+    save_json(temp_tasks_file, [task])
+
+    cmd = [
+        sys.executable,
+        str(BASE_DIR / 'verify_browser_assist.py'),
+        '--tasks-file', str(temp_tasks_file),
+        '--max-retries', '5',
+        '--no-manual-captcha',
+    ]
+    env = os.environ.copy()
+    env['VERIFY_RUNTIME_DIR'] = str(OUTPUT_DIR)
+    env.setdefault('DISPLAY', ':0')
+    env.setdefault('XAUTHORITY', '/home/li/.Xauthority')
+
+    try:
+        proc = subprocess.run(cmd, cwd=str(BASE_DIR), env=env, capture_output=True, text=True, timeout=180)
+        stdout, stderr, returncode = proc.stdout, proc.stderr, proc.returncode
+    except subprocess.TimeoutExpired as exc:
+        stdout, stderr, returncode = exc.stdout or '', (exc.stderr or '') + '\n[timeout 180s]', 124
+    except Exception as exc:
+        stdout, stderr, returncode = '', '[spawn] ' + str(exc), 500
+
+    try:
+        apply_results()
+    except Exception:
+        pass
+
+    invoices = load_parsed_invoices()
+    refreshed = next((x for x in invoices if x.get('file_hash') == body.file_hash), inv)
+
+    return {
+        'ok': bool(refreshed.get('verify_screenshot_path') or refreshed.get('verify_status') in ('查验通过', '查验成功')),
+        'file_hash': body.file_hash,
+        'file_name': inv.get('file_name', ''),
+        'verify_status': refreshed.get('verify_status', verify_status),
+        'verify_screenshot_path': refreshed.get('verify_screenshot_path', ''),
+        'stdout': str(stdout)[-4000:],
+        'stderr': str(stderr)[-2000:],
+        'returncode': returncode,
+    }
 
 
 @app.get('/api/screenshot/{file_hash}')
