@@ -1724,11 +1724,16 @@ async function autoVerifyScreenshot(fileHash) {
     await refreshAllData();
     return;
   }
-  const status = data.verify_status || '未知';
+  const status = data.verify_status || '';
   const screenshot = data.verify_screenshot_path || '';
-  const summary = data.ok
-    ? ('✅ 验证完成：' + status + (screenshot ? '\n截图：' + screenshot : ''))
-    : ('⚠️ 验证结果：' + status + '\n' + (data.stdout ? data.stdout.slice(-500) : ''));
+  var summary;
+  if (data.ok) {
+    summary = '✅ 验证完成：' + status;
+    if (screenshot) { summary = summary + '\n截图：' + screenshot; }
+  } else {
+    summary = '⚠️ 验证结果：' + status;
+    if (data.stdout) { summary = summary + '\n' + data.stdout.slice(-500); }
+  }
   document.getElementById('result-box').textContent = summary;
   currentTab = 'all';
   await refreshAllData();
