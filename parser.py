@@ -790,15 +790,31 @@ def parse_invoice(path: Path) -> InvoiceRecord:
         if not buyer_tax: buyer_tax = rt
         if not seller_name: seller_name = rs
         if not seller_tax: seller_tax = rx
-    # Last resort: on heavily fragmented PDFs, label "称:" appears twice;
-    # first occurrence = buyer, second = seller (matches typical invoice layout)
+    # Last resort: on heavily fragmented PDFs, standard "购/销" prefix
+    # matching fails because labels and values are separated by many lines.
+    # Use proximity to seller-area indicators (复核/开票人/销售方) instead.
     if not buyer_name or not seller_name:
-        all_names = list(re.finditer(r'称[:：]\s*([^\n]+)', text))
-        all_names_raw = list(re.finditer(r'称[:：]\s*([^\n]+)', raw_text))
-        names = all_names if len(all_names) >= 2 else all_names_raw
-        if len(names) >= 2:
-            if not buyer_name: buyer_name = names[0].group(1).strip()
-            if not seller_name: seller_name = names[1].group(1).strip()
+        import re as _re
+        all_names = list(_re.finditer(r'称[:：]\s*([^\n]+)', text))
+        if len(all_names) >= 2:
+            scored = []
+            for m in all_names:
+                pos = m.start()
+                after = text[pos:pos+800]
+                score = 0
+                if '复核' in after[:400] or '复 核' in after[:400]:
+                    score += 2
+                if '开票人' in after[:400] or '开 票 人' in after[:400]:
+                    score += 2
+                if '销售方' in after[:400]:
+                    score += 1
+                scored.append((score, m.group(1).strip()))
+            # Sort by seller_score descending; highest = seller
+            scored.sort(key=lambda x: x[0], reverse=True)
+            if scored[0][0] > 0 and not seller_name:
+                seller_name = scored[0][1]
+            if len(scored) >= 2 and not buyer_name:
+                buyer_name = scored[1][1]
     rec.buyer_name = buyer_name
     rec.buyer_tax_no = buyer_tax
     rec.seller_name = seller_name
