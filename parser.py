@@ -210,6 +210,14 @@ def extract_text_pdftotext(path: Path) -> str:
         return ''
 
 
+def extract_text_pdftotext_raw(path: Path) -> str:
+    """Extract text with pdftotext -raw for better field continuity on fragmented PDFs."""
+    try:
+        return subprocess.check_output(['pdftotext', '-raw', str(path), '-'], stderr=subprocess.DEVNULL, text=True, encoding='utf-8', errors='replace')
+    except Exception:
+        return ''
+
+
 def normalize_text(text: str) -> str:
     text = text.replace('\r', '\n').replace('\u3000', ' ')
     text = re.sub(r'\n{3,}', '\n\n', text)
@@ -724,6 +732,7 @@ def parse_invoice(path: Path) -> InvoiceRecord:
         return parse_invoice_ofd(path)
 
     text = normalize_text(extract_text_pdftotext(path))
+    raw_text = normalize_text(extract_text_pdftotext_raw(path))
     rec = InvoiceRecord(
         file_name=path.name,
         file_path=str(path),
@@ -741,14 +750,55 @@ def parse_invoice(path: Path) -> InvoiceRecord:
 
     rec.invoice_type = search(r'(电子发票（[^\n]+）)', text) or search(r'(电子发票\([^\n]+\))', text)
     rec.invoice_number = search(r'发票号码[:：]\s*([0-9]{8,})', text)
-    rec.invoice_date = search(r'开票日期[:：]\s*([0-9]{4}年[0-9]{2}月[0-9]{2}日)', text)
+    rec.invoice_date = search(r'开票日期[:：]\s*([0-9]{4}年\s*[0-9]{1,2}\s*月[0-9]{1,2}\s*日)', text)
     rec.drawer = search(r'开票人[:：]\s*([^\n]+)', text)
-    rec.total_amount = clean_money(search(r'[（(]小写[）)]\s*¥\s*([0-9.,]+)', text))
-    rec.tax_amount = clean_money(search(r'税\s*额[\s\S]{0,30}?¥\s*(-?[0-9.,]+)', text))
+    rec.total_amount = clean_money(search(r'[（(]小写[）)]\s*[¥￥]\s*([0-9.,]+)', text))
+    rec.tax_amount = clean_money(search(r'税\s*额[\s\S]{0,30}?[¥￥]\s*(-?[0-9.,]+)', text))
     rec.amount_ex_tax = clean_money(search(r'金\s*额\s*\n?\s*(-?[0-9.,]+)', text))
     rec.tax_rate = search(r'税率/征收率\s*\n?\s*([0-9]+%)', text)
 
+    # Fallback to raw text for fragmented PDFs (e.g. Shanghai e-invoices)
+    # On some PDFs, pdftotext layout mode scatters table cells across lines;
+    # raw mode keeps values closer but form labels may be separated from values.
+    if not rec.invoice_date:
+        # Try label-based match (with flexible spacing)
+        rec.invoice_date = search(r'开票日期[:：]\s*([0-9]{4}\s*年\s*[0-9]{1,2}\s*月\s*[0-9]{1,2}\s*日)', raw_text)
+        if rec.invoice_date:
+            rec.invoice_date = re.sub(r'\s+', '', rec.invoice_date)
+    if not rec.invoice_date:
+        # Try compact date block (common in e-invoices: "2025 11 22")
+        m = re.search(r'(\d{4})\s+(\d{1,2})\s+(\d{1,2})', raw_text)
+        if m:
+            rec.invoice_date = f'{m.group(1)}年{m.group(2).zfill(2)}月{m.group(3).zfill(2)}日'
+
+    if not rec.total_amount:
+        rec.total_amount = clean_money(search(r'[（(]小写[）)]\s*[¥￥]\s*([0-9.,]+)', raw_text))
+    if not rec.total_amount:
+        rec.total_amount = clean_money(search(r'价税合计.{0,15}?[¥￥]\s*([0-9.,]+)', raw_text))
+    if not rec.total_amount:
+        # Match Chinese amount + ¥ number (e.g. "伍拾贰圆伍角整 ¥ 52.50")
+        rec.total_amount = clean_money(search(r'[一二三四五六七八九十零圆角分整伍佰仟万亿元\s]+\s*[¥￥]\s*([0-9.,]+)', raw_text))
+
+    if not rec.invoice_number:
+        rec.invoice_number = search(r'发票号码[:：]\s*([0-9]{8,})', raw_text)
+
     buyer_name, buyer_tax, seller_name, seller_tax = parse_buyer_seller(text)
+    # Fallback: try raw text for buyer/seller on fragmented PDFs
+    if not buyer_name or not seller_name:
+        rb, rt, rs, rx = parse_buyer_seller(raw_text)
+        if not buyer_name: buyer_name = rb
+        if not buyer_tax: buyer_tax = rt
+        if not seller_name: seller_name = rs
+        if not seller_tax: seller_tax = rx
+    # Last resort: on heavily fragmented PDFs, label "称:" appears twice;
+    # first occurrence = buyer, second = seller (matches typical invoice layout)
+    if not buyer_name or not seller_name:
+        all_names = list(re.finditer(r'称[:：]\s*([^\n]+)', text))
+        all_names_raw = list(re.finditer(r'称[:：]\s*([^\n]+)', raw_text))
+        names = all_names if len(all_names) >= 2 else all_names_raw
+        if len(names) >= 2:
+            if not buyer_name: buyer_name = names[0].group(1).strip()
+            if not seller_name: seller_name = names[1].group(1).strip()
     rec.buyer_name = buyer_name
     rec.buyer_tax_no = buyer_tax
     rec.seller_name = seller_name
