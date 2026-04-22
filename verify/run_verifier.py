@@ -148,6 +148,8 @@ def build_js_runtime_env() -> dict[str, Any]:
 
 
 def run_js_key9(fpdm: str, fphm: str, yzm_publickey: str, cy_arg: str) -> dict[str, Any]:
+    # Ensure wlop.js is available before running the node sandbox
+    ensure_wlop_js()
     node_script = BASE_DIR / 'node_key9_sandbox.js'
     payload = {
         'fpdm': fpdm,
@@ -187,10 +189,15 @@ def ensure_wlop_js() -> Path:
         return wlop_path
     wlop_path.parent.mkdir(parents=True, exist_ok=True)
     print(f'[verify] Downloading wlop.js from {WLOP_JS_URL} ...')
+    try:
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    except Exception:
+        pass
     resp = requests.get(WLOP_JS_URL, headers={
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36',
         'Referer': 'https://inv-veri.chinatax.gov.cn/',
-    }, verify=False, timeout=30)
+    }, verify=False, timeout=60)
     resp.raise_for_status()
     if len(resp.content) < 10000:
         raise RuntimeError(f'Downloaded wlop.js too small ({len(resp.content)} bytes), likely not the real file')

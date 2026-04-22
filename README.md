@@ -140,6 +140,12 @@ python captcha_workbench.py --port 8787
 ```
 访问：<http://localhost:8787>
 
+> **`wlop.js` 自动下载：** 启动时会自动从税务局网站下载 `verify/upstream_js/wlop.js`（验证码签名所需）。如果自动下载失败（网络不通等），启动时会显示警告，验证码查验功能将不可用。此时可手动下载：
+> ```bat
+> python -c "import requests; requests.packages.urllib3.disable_warnings(); r=requests.get('https://inv-veri.chinatax.gov.cn/js/wlop.js',verify=False,headers={'User-Agent':'Mozilla/5.0'}); open('verify/upstream_js/wlop.js','wb').write(r.content); print(f'downloaded {len(r.content)} bytes')"
+> ```
+> 如果 Python 也无法下载，可从其他已部署的实例复制该文件到 `verify/upstream_js/wlop.js`。
+
 #### 5. Windows 首次使用说明（重要）
 - 首次启动时，如果还没有任何 `发票_解析结果_*` 目录，页面下拉框可能是空的，这是正常的。
 - 现在可以直接在 **“手填/新建输出目录”** 输入一个目录，例如：
