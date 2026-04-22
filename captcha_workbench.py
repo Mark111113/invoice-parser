@@ -136,16 +136,20 @@ def set_output_dir(path: str | Path) -> None:
     ensure_dirs()
 
 
+def _current_output_parent(path: Path | None = None) -> Path:
+    target = path or OUTPUT_DIR
+    return target.parent if target.name.startswith('发票_解析结果') else target
+
+
 def list_output_dirs() -> list[dict[str, Any]]:
     dirs: list[dict[str, Any]] = []
-    parent = DEFAULT_OUTPUT_PARENT
-    if not parent.exists():
-        return dirs
-    for p in sorted(parent.iterdir()):
-        if not p.is_dir():
-            continue
-        if not p.name.startswith('发票_解析结果'):
-            continue
+    seen: set[str] = set()
+    parent = _current_output_parent()
+
+    def _append_dir(p: Path) -> None:
+        key = str(p.resolve()) if p.exists() else str(p)
+        if key in seen:
+            return
         tasks_file = p / 'verify_tasks' / 'ready_tasks.json'
         count = 0
         if tasks_file.exists():
@@ -156,11 +160,24 @@ def list_output_dirs() -> list[dict[str, Any]]:
         has_parsed = (p / '发票解析结果.json').exists()
         dirs.append({
             'path': str(p),
-            'name': p.name,
+            'name': p.name or str(p),
             'task_count': count,
             'has_parsed': has_parsed,
             'selected': p.resolve() == OUTPUT_DIR.resolve() if p.exists() else False,
         })
+        seen.add(key)
+
+    if parent.exists():
+        for p in sorted(parent.iterdir()):
+            if not p.is_dir():
+                continue
+            if not p.name.startswith('发票_解析结果'):
+                continue
+            _append_dir(p)
+
+    if OUTPUT_DIR.exists():
+        _append_dir(OUTPUT_DIR)
+
     return dirs
 
 
@@ -828,9 +845,16 @@ def api_tasks():
 
 @app.post('/api/select_output_dir')
 def api_select_output_dir(body: SelectOutputDirRequest):
-    target = Path(body.output_dir)
-    if not target.exists() or not target.is_dir():
-        raise HTTPException(status_code=400, detail='output_dir not found')
+    output_dir = (body.output_dir or '').strip()
+    if not output_dir:
+        raise HTTPException(status_code=400, detail='output_dir is required')
+    target = Path(output_dir)
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f'failed to create output_dir: {exc}')
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail='output_dir is not a directory')
     set_output_dir(target)
     tasks = load_tasks()
     return {
@@ -1214,6 +1238,8 @@ button.danger { background:#fff1f0; color:#c53030; border-color:#ffccc7; }
 <div class='actions'>
   <label>输入目录：<input id='input-dir' type='text' value='' placeholder='选择或输入发票目录路径' style='width:380px; margin-right:6px;' /></label>
   <label>输出目录：<select id='output-dir-select' style='min-width:300px; margin-right:6px;'></select></label>
+  <label>手填/新建输出目录：<input id='output-dir-input' type='text' value='' placeholder='首次启动可直接填一个目录，如 D:\\invoice_output' style='width:380px; margin-right:6px;' /></label>
+  <button onclick='applyOutputDirInput()'>使用/创建该目录</button>
   <button class='primary' onclick='parseInputDir()'>解析</button>
   <button onclick='rebuildTasks()'>重建查验任务</button>
   <button onclick='loadTasks()'>刷新</button>
@@ -1262,8 +1288,20 @@ let lastTasks = [];
 let lastTabs = {all:0,pending:0,partial:0,passed:0,failed:0};
 let bulkPollTimer = null;
 
+function basenameOfPath(p) {
+  if (!p) return '';
+  return p.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+}
+
+function getChosenOutputDir() {
+  const inputVal = (document.getElementById('output-dir-input')?.value || '').trim();
+  const selectVal = (document.getElementById('output-dir-select')?.value || '').trim();
+  return inputVal || selectVal;
+}
+
 function renderOutputDirs(data) {
   const sel = document.getElementById('output-dir-select');
+  const input = document.getElementById('output-dir-input');
   const curVal = sel.value;
   sel.innerHTML = '';
   (data.output_dirs || []).forEach(item => {
@@ -1277,6 +1315,7 @@ function renderOutputDirs(data) {
     sel.appendChild(opt);
   });
   if (!sel.value && sel.options.length) sel.selectedIndex = 0;
+  if (input && data.output_dir && !input.value.trim()) input.value = data.output_dir;
 }
 
 function statusBadge(status) {
@@ -1411,6 +1450,10 @@ async function refreshAllData(showMessage='') {
     const inputEl = document.getElementById('input-dir');
     if (inputEl && !inputEl.value) inputEl.value = tasksData.input_dir;
   }
+  if (tasksData.output_dir) {
+    const outputInputEl = document.getElementById('output-dir-input');
+    if (outputInputEl && !outputInputEl.value.trim()) outputInputEl.value = tasksData.output_dir;
+  }
   lastTasks = tasksData.tasks || [];
   lastParsedInvoices = invData.invoices || [];
   renderTabs(invData.tabs || tasksData.tabs || {all:0,pending:0,partial:0,passed:0,failed:0});
@@ -1480,17 +1523,47 @@ async function selectOutputDir() {
   });
   const data = await res.json();
   if (!res.ok) { document.getElementById('result-box').textContent = JSON.stringify(data, null, 2); return; }
+  const input = document.getElementById('output-dir-input');
+  if (input) input.value = data.output_dir || outputDir;
   await refreshAllData(`已切换目录：${data.output_dir}`);
+}
+
+async function applyOutputDirInput() {
+  const outputDir = (document.getElementById('output-dir-input').value || '').trim();
+  if (!outputDir) {
+    alert('请输入输出目录');
+    return;
+  }
+  document.getElementById('result-box').textContent = `⏳ 正在使用/创建输出目录：${outputDir}`;
+  const res = await fetch('/api/select_output_dir', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({output_dir: outputDir})
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    document.getElementById('result-box').textContent = '❌ ' + JSON.stringify(data, null, 2);
+    return;
+  }
+  await refreshAllData(`✅ 已使用输出目录：${data.output_dir}`);
 }
 
 async function uploadFiles(fileList) {
   if (!fileList || !fileList.length) return;
-  const outputDir = document.getElementById('output-dir-select').value;
-  if (!outputDir) { alert('请先选择输出目录'); return; }
+  const outputDir = getChosenOutputDir();
+  if (!outputDir) { alert('请先选择或填写输出目录'); return; }
 
   const statusEl = document.getElementById('upload-status');
-  statusEl.textContent = `⏳ 正在上传 ${fileList.length} 个文件...`;
+  statusEl.textContent = `⏳ 正在准备输出目录并上传 ${fileList.length} 个文件...`;
   document.getElementById('result-box').textContent = '';
+
+  const selectRes = await fetch('/api/select_output_dir', {
+    method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({output_dir: outputDir})
+  });
+  const selectData = await selectRes.json();
+  if (!selectRes.ok) {
+    statusEl.textContent = `❌ ${selectData.detail || '输出目录设置失败'}`;
+    document.getElementById('result-box').textContent = JSON.stringify(selectData, null, 2);
+    return;
+  }
 
   const formData = new FormData();
   for (const f of fileList) formData.append('files', f);
@@ -1504,7 +1577,7 @@ async function uploadFiles(fileList) {
       return;
     }
     const routed = data.routed_outputs || [];
-    const routedText = routed.length ? '；分发到 ' + routed.map(x => `${x.output_dir.split('/').pop()}(+${x.added})`).join('，') : '';
+    const routedText = routed.length ? '；分发到 ' + routed.map(x => `${basenameOfPath(x.output_dir)}(+${x.added})`).join('，') : '';
     statusEl.textContent = `✅ 上传 ${data.uploaded} 个文件，新入库 ${data.new_invoices || 0} 张${routedText}`;
     if (data.skipped && data.skipped.length) {
       statusEl.textContent += `（跳过 ${data.skipped.join(', ')}）`;
@@ -1518,9 +1591,9 @@ async function uploadFiles(fileList) {
 
 async function parseInputDir() {
   const inputDir = document.getElementById('input-dir').value.trim();
-  const outputDir = document.getElementById('output-dir-select').value;
+  const outputDir = getChosenOutputDir();
   if (!inputDir) { alert('请输入输入目录'); return; }
-  if (!outputDir) { alert('请选择输出目录'); return; }
+  if (!outputDir) { alert('请选择或填写输出目录'); return; }
 
   document.getElementById('result-box').textContent = '⏳ 正在解析，请稍候...';
   document.getElementById('result-box').className = 'warn';
@@ -1542,7 +1615,7 @@ async function parseInputDir() {
 
   const routed = data.routed_outputs || [];
   const summary = routed.length
-    ? `✅ 解析完成，新入库 ${data.new_invoices || 0} 张，分发到：${routed.map(x => `${x.output_dir.split('/').pop()}(+${x.added})`).join('，')}`
+    ? `✅ 解析完成，新入库 ${data.new_invoices || 0} 张，分发到：${routed.map(x => `${basenameOfPath(x.output_dir)}(+${x.added})`).join('，')}`
     : `✅ 解析完成：${data.invoice_count || 0} 张发票 → ${data.output_dir}`;
   if (data.task_count) {
     document.getElementById('result-box').textContent = summary + `\\n当前选中目录已生成 ${data.task_count} 条查验任务，可点击"取验证码"。`;
